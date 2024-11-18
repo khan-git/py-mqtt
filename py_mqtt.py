@@ -7,6 +7,7 @@ from paho.mqtt.enums import CallbackAPIVersion
 import json
 from cryptography.fernet import Fernet, InvalidToken
 import base64
+from queue import Empty, SimpleQueue
 
 stylesheet = """
 QMainWindow,
@@ -133,6 +134,11 @@ class MainWindow(QMainWindow):
         disconnect_action.setShortcut("Ctrl+D")
         file_menu.addAction(disconnect_action)
 
+        refresh_action = QAction("Refresh", self)
+        refresh_action.triggered.connect(self.refresh_messages)
+        refresh_action.setShortcut("Ctrl+R")
+        file_menu.addAction(refresh_action)
+
         publish_action = QAction("Publish", self)
         publish_action.triggered.connect(self.publish_topic)
         file_menu.addAction(publish_action)
@@ -169,10 +175,41 @@ class MainWindow(QMainWindow):
         self.MESSAGE_SIGNAL.connect(self.handle_message)
 
         self.resize(800, 600)
+        self.msg_queue: SimpleQueue = SimpleQueue()
 
         self.move(100, 100)
         self.mqtt_client = None
 
+        self.abort_thread = False
+        worker = Worker(self.process_messages)
+        worker.signals.result.connect(self.update_list)
+        self.thread_pool.start(worker)
+
+    def closeEvent(self, event):
+        self.abort_thread = True
+        self.thread_pool.waitForDone()
+        if self.mqtt_client:
+            self.mqtt_client.disconnect()
+            self.mqtt_client.loop_stop()
+        event.accept()
+
+    def update_list(self, message):
+        self.tree_widget.resizeColumnToContents(0)
+        self.tree_widget.resizeColumnToContents(1)
+
+
+    def process_messages(self):
+        while self.abort_thread == False:
+            try:
+                message = self.msg_queue.get(block=False)
+                self.handle_message(message)
+            except Empty:
+                pass
+
+    def refresh_messages(self):
+        self.tree_widget.clear()
+        if self.mqtt_client:
+            self.mqtt_client.subscribe("#")
 
     def resize_columns(self):
         self.tree_widget.resizeColumnToContents(0)
@@ -434,8 +471,6 @@ class MainWindow(QMainWindow):
                         node = new_child
             elif topic == node.text(0) and topic == topics[-1]:
                 node.setText(1, message.payload.decode())
-        self.tree_widget.resizeColumnToContents(0)
-        self.tree_widget.resizeColumnToContents(1)
 
     def on_connect(self, client: mqtt.Client, userdata, connect_flags, reason_code, properties):
         print(f"{userdata['id']} Connected with result code {reason_code}")
@@ -445,6 +480,7 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Disconnected", f"Disconnected with reason code {reason_code}")
 
     def on_message(self, client: mqtt.Client, userdata, msg: mqtt.MQTTMessage):
+        # self.msg_queue.put(msg)
         self.MESSAGE_SIGNAL.emit(msg)
 
     def publish_topic(self):
