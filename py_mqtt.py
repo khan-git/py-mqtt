@@ -3,89 +3,25 @@ from PyQt6.QtGui import QAction
 from PyQt6.QtCore import *
 import sys
 import paho.mqtt.client as mqtt
+from paho.mqtt.client import MQTTMessageInfo
 from paho.mqtt.enums import CallbackAPIVersion
 import json
 from cryptography.fernet import Fernet, InvalidToken
 import base64
 from queue import Empty, SimpleQueue
+import os
 
-stylesheet = """
-QMainWindow,
-QStatusBar,
-QMessageBox,
-QDialog,
-QTextBrowser,
-QLabel {
-    background-color: white;
-    color: black;
-}
 
-QLabel {
-    font-size: 18px;
-}
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+        print(f"Base path: {base_path}")
+    except Exception:
+        base_path = os.path.abspath(".")
 
-QMenuBar {
-    background-color: #444;
-    color: #fff;
-}
-
-QMenuBar::item {
-    background-color: #444;
-    color: #fff;
-}
-
-QMenuBar::item:selected {
-    background-color: #666;
-}
-
-QMenu {
-    background-color: #444;
-    color: #fff;
-}
-
-QMenu::item:selected {
-    background-color: #666;
-}
-
-QTreeWidget {
-    background-color: #fff;
-    alternate-background-color: #f9f9f9;
-    color: black;
-}
-
-QTreeWidget::item {
-    color: black;
-}
-
-QTreeWidget::item:selected {
-    background-color: #cce7ff;
-    color: black;
-}
-
-QTreeWidget::branch:has-siblings:!adjoins-item {
-    border-image: url(images/vline.png) 0;
-}
-QTreeWidget::branch:has-siblings:adjoins-item {
-    border-image: url(images/branch-more.png) 0;
-}
-
-QTreeWidget::branch:!has-children:!has-siblings:adjoins-item {
-    border-image: url(images/branch-end.png) 0;
-}
-
-QTreeWidget::branch:has-children:!has-siblings:closed,
-QTreeWidget::branch:closed:has-children:has-siblings {
-    border-image: none;
-    image: url(images/branch-closed.png);
-}
-
-QTreeWidget::branch:open:has-children:!has-siblings,
-QTreeWidget::branch:open:has-children:has-siblings {
-    border-image: none;
-    image: url(images/branch-open.png);
-}
-"""
-
+    return os.path.join(base_path, relative_path)
 
 class WorkerSignals(QObject):
     finished = pyqtSignal()
@@ -111,12 +47,101 @@ class Worker(QRunnable):
 class MainWindow(QMainWindow):
     MESSAGE_SIGNAL = pyqtSignal(mqtt.MQTTMessage)
 
+    STYLE_SHEET = """
+    QMainWindow,
+    QStatusBar,
+    QMessageBox,
+    QDialog,
+    QTextBrowser,
+    QLabel {
+        background-color: white;
+        color: black;
+    }
+
+    QLabel {
+        font-size: 18px;
+    }
+
+    QMenuBar {
+        background-color: #444;
+        color: #fff;
+    }
+
+    QMenuBar::item {
+        background-color: #444;
+        color: #fff;
+    }
+
+    QMenuBar::item:selected {
+        background-color: #666;
+    }
+
+    QMenu {
+        background-color: #444;
+        color: #fff;
+    }
+
+    QMenu::item:selected {
+        background-color: #666;
+    }
+
+    QTreeWidget {
+        background-color: #fff;
+        alternate-background-color: #f9f9f9;
+        color: black;
+    }
+
+    QTreeWidget::item {
+        color: black;
+    }
+
+    QTreeWidget::item:selected {
+        background-color: #cce7ff;
+        color: black;
+    }
+
+    # QTreeWidget::branch:has-siblings:!adjoins-item {
+    #     border-image: url(images/vline.png) 0;
+    # }
+    # QTreeWidget::branch:has-siblings:adjoins-item {
+    #     border-image: url(images/branch-more.png) 0;
+    # }
+
+    # QTreeWidget::branch:!has-children:!has-siblings:adjoins-item {
+    #     border-image: url(images/branch-end.png) 0;
+    # }
+
+    # QTreeWidget::branch:has-children:!has-siblings:closed,
+    # QTreeWidget::branch:closed:has-children:has-siblings {
+    #     border-image: none;
+    #     image: url(images/branch-closed.png);
+    # }
+
+    # QTreeWidget::branch:open:has-children:!has-siblings,
+    # QTreeWidget::branch:open:has-children:has-siblings {
+    #     border-image: none;
+    #     image: url(images/branch-open.png);
+    # }
+    """
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Py-MQTT")
+
+        screen = QApplication.primaryScreen().geometry()
+        window_geometry = self.geometry()
+        x = (screen.width() - window_geometry.width()) // 2
+        y = (screen.height() - window_geometry.height()) // 2
+        self.move(x, y)
         
-        self.setGeometry(100, 100, 280, 80)
-        self.setStyleSheet(stylesheet)
+        # Update the image paths in the stylesheet
+        self.stylesheet = self.STYLE_SHEET.replace("url(images/vline.png)", f"url({resource_path('images/vline.png')})")
+        self.stylesheet = self.stylesheet.replace("url(images/branch-more.png)", f"url({resource_path('images/branch-more.png')})")
+        self.stylesheet = self.stylesheet.replace("url(images/branch-end.png)", f"url({resource_path('images/branch-end.png')})")
+        self.stylesheet = self.stylesheet.replace("url(images/branch-closed.png)", f"url({resource_path('images/branch-closed.png')})")
+        self.stylesheet = self.stylesheet.replace("url(images/branch-open.png)", f"url({resource_path('images/branch-open.png')})")
+        
+        self.setStyleSheet(self.stylesheet)
         self.thread_pool = QThreadPool()
         self.cipher = None
 
@@ -143,9 +168,9 @@ class MainWindow(QMainWindow):
         publish_action.triggered.connect(self.publish_topic)
         file_menu.addAction(publish_action)
 
-        save_settings_action = QAction("Save settings", self)
-        save_settings_action.triggered.connect(self.save_settings)
-        file_menu.addAction(save_settings_action)
+        # save_settings_action = QAction("Save settings", self)
+        # save_settings_action.triggered.connect(self.save_settings)
+        # file_menu.addAction(save_settings_action)
 
         change_password_action = QAction("Change password", self)
         change_password_action.triggered.connect(self.change_password)
@@ -157,7 +182,30 @@ class MainWindow(QMainWindow):
         file_menu.addAction(exit_action)
 
         self.setMenuWidget(menu_bar)
+        
+        splitter = QSplitter(Qt.Orientation.Vertical, self)
+        self.setCentralWidget(splitter)
+        splitter.setSizes([200, 400])
 
+
+        self.tab_widget = QTabWidget(self)
+        self.tab_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # self.setCentralWidget(self.tab_widget)
+        splitter.addWidget(self.tab_widget)
+        self.raw_mqtt_browser = QTextBrowser(splitter)
+        splitter.addWidget(self.raw_mqtt_browser)
+
+        self.tab1 = QWidget()
+        self.tab2 = QWidget()
+
+        self.tab_widget.addTab(self.tab1, "Tree")
+        self.tab_widget.addTab(self.tab2, "Watch list")
+        self.tab_widget.setTabPosition(QTabWidget.TabPosition.West)
+
+        tab1_layout = QVBoxLayout(self.tab1)
+        tab2_layout = QVBoxLayout(self.tab2)
+
+        # Tab 1 Tree
         self.tree_widget: QTreeWidget = QTreeWidget(self)
         self.tree_widget.setHeaderLabels(["Topic", "Value"])
         self.tree_widget.itemDoubleClicked.connect(self.on_item_double_clicked)
@@ -165,25 +213,89 @@ class MainWindow(QMainWindow):
         self.tree_widget.sortItems(0, Qt.SortOrder.AscendingOrder)
         self.tree_widget.setAlternatingRowColors(True)
         self.tree_widget.itemExpanded.connect(self.resize_columns)
+        self.tree_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree_widget.customContextMenuRequested.connect(self.open_context_menu)
+
+        # Tab 2 Watch list
+        self.watch_list_table = QTableWidget()
+        self.tab2.layout().addWidget(self.watch_list_table)
+
+        self.watch_list_table.setColumnCount(2)
+        self.watch_list_table.setHorizontalHeaderLabels(["Topic", "Value"])
+        self.watch_list_table.setSortingEnabled(True)
+        self.watch_list_table.sortItems(0, Qt.SortOrder.AscendingOrder)
+        self.watch_list_table.setAlternatingRowColors(True)
+        # self.watch_list_table.itemDoubleClicked.connect(self.on_item_double_clicked)
+        self.watch_list_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.watch_list_table.customContextMenuRequested.connect(self.context_menu_watch_list)
+        self.watch_list_table.resizeColumnsToContents()
+        self.watch_list_table.resizeRowsToContents()
+        self.watch_list_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.watch_list_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.watch_list_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.watch_list_table.setShowGrid(True)
 
         # Set the tree widget as the central widget
-        self.setCentralWidget(self.tree_widget)
+        self.tab1.layout().addWidget(self.tree_widget)
         self.status_bar = QStatusBar(self)
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Ready")
 
         self.MESSAGE_SIGNAL.connect(self.handle_message)
 
-        self.resize(800, 600)
+        self.resize(1200, 800)
         self.msg_queue: SimpleQueue = SimpleQueue()
 
-        self.move(100, 100)
         self.mqtt_client = None
 
         self.abort_thread = False
         worker = Worker(self.process_messages)
         worker.signals.result.connect(self.update_list)
         self.thread_pool.start(worker)
+            
+    def open_context_menu(self, position):
+        menu = QMenu()
+        add_to_watch_action = QAction("Add to watchlist", self)
+        add_to_watch_action.triggered.connect(self.add_to_watchlist)
+        menu.addAction(add_to_watch_action)
+
+        menu.exec(self.tree_widget.viewport().mapToGlobal(position))
+
+    def context_menu_watch_list(self, position):
+        menu = QMenu()
+        remove_from_watch_action = QAction("Remove", self)
+        remove_from_watch_action.triggered.connect(self.remove_from_watchlist)
+        menu.addAction(remove_from_watch_action)
+        menu.exec(self.tree_widget.viewport().mapToGlobal(position))
+
+    def add_to_watchlist(self, value):
+        selected_item = self.tree_widget.currentItem()
+        if selected_item:
+            topic = selected_item.text(0)
+            value = selected_item.text(1)
+            parent = selected_item.parent()
+            while parent:
+                topic = parent.text(0) + "/" + topic
+                parent = parent.parent()
+            items = self.watch_list_table.findItems(topic, Qt.MatchFlag.MatchExactly)
+            if len(items) == 0:
+                # The rows will get sorted once the topix is inserted.
+                # Latest row will not be row.count() - 1
+                self.watch_list_table.insertRow(self.watch_list_table.rowCount())                
+                topic_item = QTableWidgetItem(topic)
+                self.watch_list_table.setItem(self.watch_list_table.rowCount() - 1, 0, topic_item)
+                self.watch_list_table.setItem(topic_item.row(), 1, QTableWidgetItem(value))
+                self.watch_list_table.resizeColumnsToContents()
+
+                # Backup watch list
+                watch_list = [self.watch_list_table.item(row, 0).text() for row in range(self.watch_list_table.rowCount())]
+                print(f"Watch list: {watch_list}")
+                self.save_to_settings('watch_list', watch_list, True)
+
+    def remove_from_watchlist(self, value):
+        selected_item = self.watch_list_table.currentItem()
+        if selected_item:
+            self.watch_list_table.removeRow(selected_item.row())
 
     def closeEvent(self, event):
         self.abort_thread = True
@@ -242,16 +354,16 @@ class MainWindow(QMainWindow):
             settings = QSettings("PyMQTT", "Settings")
             data_settings_json: dict = settings.value("data", None)
             if data_settings_json is None:
-                data_settings = {"data": {'hosts': {}}}
+                data_settings = {'hosts': {}}
             else:
                 try:
                     data_settings = json.loads(self.cipher.decrypt(data_settings_json.encode()).decode())
                 except json.JSONDecodeError:
-                    data_settings = {"data": {'hosts': {}}}
+                    data_settings = {'hosts': {}}
                     QMessageBox.warning(self, "JSON bad", "Invalid JSON data")
                 except InvalidToken as e:
                     QMessageBox.warning(self, "Invalid Token", "The provided password is incorrect.")
-                    data_settings = {"data": {'hosts': {}}}
+                    data_settings = {'hosts': {}}
                     self.cipher = None
             return data_settings
 
@@ -262,7 +374,7 @@ class MainWindow(QMainWindow):
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Connect to MQTT Broker")
-        dialog.setStyleSheet(stylesheet)
+        dialog.setStyleSheet(self.stylesheet)
 
         layout = QVBoxLayout(dialog)
 
@@ -270,8 +382,9 @@ class MainWindow(QMainWindow):
         url_input = QComboBox()
         url_input.setEditable(True)
 
-        data_settings = self.get_settings_data()
-        url_input.addItems(data_settings['data']['hosts'].keys())
+        hosts = self.get_from_settings('hosts', True)
+        if hosts is not None:
+            url_input.addItems(hosts.keys())
 
         layout.addWidget(url_label)
         layout.addWidget(url_input)
@@ -293,19 +406,24 @@ class MainWindow(QMainWindow):
         layout.addWidget(password_label)
         layout.addWidget(password_input)
 
-        last_host = data_settings['data']['last_host'] if 'last_host' in data_settings['data'] else None
-        if last_host is not None:
+        last_host = self.get_from_settings('last_host', True)
+
+        last_host: str  = last_host if last_host is not None else ''
+        if last_host in hosts:
             url_input.setCurrentText(last_host)
-            port_input.setText(str(data_settings['data']['hosts'][last_host].get("port", "")))
-            username_input.setText(data_settings['data']['hosts'][last_host].get("username", ""))
-            password_input.setText(data_settings['data']['hosts'][last_host].get("password", ""))
+            port_input.setText(str(hosts[last_host].get("port", "")))
+            username_input.setText(hosts[last_host].get("username", ""))
+            password_input.setText(hosts[last_host].get("password", ""))
+            # port_input.setText(str(data_settings['hosts'][last_host].get("port", "")))
+            # username_input.setText(data_settings['hosts'][last_host].get("username", ""))
+            # password_input.setText(data_settings['hosts'][last_host].get("password", ""))
 
         def on_url_input_changed():
             selected_url = url_input.currentText()
-            if selected_url in data_settings['data']['hosts']:
-                port_input.setText(str(data_settings['data']['hosts'][selected_url].get("port", "")))
-                username_input.setText(data_settings['data']['hosts'][selected_url].get("username", ""))
-                password_input.setText(data_settings['data']['hosts'][selected_url].get("password", ""))
+            if selected_url in hosts:
+                port_input.setText(str(hosts[selected_url].get("port", "")))
+                username_input.setText(hosts[selected_url].get("username", ""))
+                password_input.setText(hosts[selected_url].get("password", ""))
 
         url_input.currentTextChanged.connect(on_url_input_changed)
 
@@ -358,7 +476,7 @@ class MainWindow(QMainWindow):
     def password_dialog(self, title="Enter Password", sub_title="Password"):
         dialog = QDialog(self)
         dialog.setWindowTitle(title)
-        dialog.setStyleSheet(stylesheet)
+        dialog.setStyleSheet(self.stylesheet)
 
         layout = QVBoxLayout(dialog)
 
@@ -397,25 +515,87 @@ class MainWindow(QMainWindow):
                                  "Failed to connect to the MQTT broker.")
             return
         self.status_bar.showMessage(f"Connected to {result._host}")
-        self.tree_widget.clear()
-        data_settings: dict = self.get_settings_data()
-        if result._host not in data_settings['data']['hosts']:
-            data_settings['data']['hosts'][result._host] = {}
-        data_settings['data']['hosts'][result._host]['port'] = result._port
-        data_settings['data']['hosts'][result._host]['username'] = result._username.decode('utf-8') if isinstance(result._username, bytes) else result._username
-        data_settings['data']['hosts'][result._host]['password'] = result._password.decode('utf-8') if isinstance(result._password, bytes) else result._password
-        data_settings['data']['last_host'] = result._host
 
-        settings = QSettings("PyMQTT", "Settings")
-        if self.cipher is not None:
-            settings.setValue('data', self.cipher.encrypt(json.dumps(data_settings).encode()).decode())
-        else:
-            QMessageBox.warning(self, "Invalid Password", "Settings not saved.")
+        self.tree_widget.clear()
+        self.watch_list_table.clearContents()
+
+        hosts = self.get_from_settings('hosts', True)
+        if result._host not in hosts:
+            hosts[result._host] = {}
+        hosts[result._host]['port'] = result._port
+        hosts[result._host]['username'] = result._username.decode('utf-8') if isinstance(result._username, bytes) else result._username
+        hosts[result._host]['password'] = result._password.decode('utf-8') if isinstance(result._password, bytes) else result._password
+        self.save_to_settings('hosts', hosts, True)
+
+        self.save_to_settings('last_host', result._host, True)
+
         self.mqtt_client = result
         if self.thread_pool.activeThreadCount() > 0:
             print(f"Active threads: {self.thread_pool.activeThreadCount()}")
 
+        self.restore_watch_list()
 
+    def restore_watch_list(self):
+        watch_list = self.get_from_settings('watch_list', True)
+        if watch_list is None:
+            return
+        print(f"Watch list: {watch_list}")
+        for topic in watch_list:
+            self.watch_list_table.insertRow(self.watch_list_table.rowCount())
+            topic_item = QTableWidgetItem(topic)
+            self.watch_list_table.setItem(self.watch_list_table.rowCount() - 1, 0, topic_item)
+            self.watch_list_table.setItem(topic_item.row(), 1, QTableWidgetItem(""))
+
+        self.watch_list_table.resizeColumnsToContents()
+
+
+    def check_cipher(self) -> bool:
+        """Check if cipher is active or create a new one"""
+        if self.cipher is None:
+            if self.password_dialog() == False:
+                return False
+        return True
+
+    def get_from_settings(self, key: str, encrypted: bool = True) -> any:
+        """Get value from settings. Encrypted option will be saved under key 'data'"""
+        settings = QSettings("PyMQTT", "Settings")
+        if encrypted == True:
+            if self.check_cipher() == True:
+                data_settings_json: str = settings.value('data', None)
+                if data_settings_json is None:
+                    return None
+                try:
+                    data_settings = json.loads(self.cipher.decrypt(data_settings_json.encode()).decode())
+                    return data_settings.get(key, None)
+                except json.JSONDecodeError:
+                    QMessageBox.warning(self, "JSON bad", "Invalid JSON data")
+                    return None
+                except InvalidToken as e:
+                    QMessageBox.warning(self, "Invalid Token", "The provided password is incorrect.")
+                    return None
+            else:
+                return None
+        else:
+            return settings.value(key, None)
+        
+    def save_to_settings(self, key: str, value: any, encrypted: bool = True):
+        """Save key value pair to settings. Encrypted option will be saved under key 'data'"""
+        settings = QSettings("PyMQTT", "Settings")            
+        if encrypted:
+            data_settings_json = self.get_settings_data()
+            data_settings_json[key] = value
+        if encrypted == True:
+            if self.check_cipher() == True:
+                settings.setValue('data', self.cipher.encrypt(json.dumps(data_settings_json).encode()).decode())
+                self.status_bar.showMessage("Encrypted settings saved")
+            else:
+                self.status_bar.showMessage("Encrypted settings not saved due to invalid password")
+            return
+        else:
+            settings.setValue(key, value)
+        self.status_bar.showMessage("Settings saved")
+
+    
     def save_settings(self):
         if self.mqtt_client is None:
             QMessageBox.information(self, "Not connected", "No connection to save")
@@ -445,6 +625,7 @@ class MainWindow(QMainWindow):
     @pyqtSlot(mqtt.MQTTMessage)
     def handle_message(self, message: mqtt.MQTTMessage):
         # print(f"Received message: {message.topic} - {message.payload.decode()}")
+        self.raw_mqtt_browser.append(f"{message.topic} - {message.payload.decode()}")
         topics = message.topic.split("/")
         node: QTreeWidgetItem = self.tree_widget.invisibleRootItem()
         topic: str
@@ -460,6 +641,7 @@ class MainWindow(QMainWindow):
                     new_child.setText(0, topic)
                     new_child.setText(1, message.payload.decode())
                     node.addChild(new_child)
+                    self.tree_widget.resizeColumnToContents(0)
                 else:
                     if node.text(0) == "<root>":
                         node.setText(0, topic)
@@ -471,6 +653,16 @@ class MainWindow(QMainWindow):
                         node = new_child
             elif topic == node.text(0) and topic == topics[-1]:
                 node.setText(1, message.payload.decode())
+
+
+        # Do Watch list
+        items = self.watch_list_table.findItems(message.topic, Qt.MatchFlag.MatchExactly)
+        if len(items) > 0:
+            try:
+                print(f"Watch list - {message.topic}: {message.payload.decode()} - {len(items)} {items[0].row()}")
+                self.watch_list_table.item(items[0].row(), 1).setText(message.payload.decode())
+            except Exception as e:
+                print(f"Error updating watch list: {e}")
 
     def on_connect(self, client: mqtt.Client, userdata, connect_flags, reason_code, properties):
         print(f"{userdata['id']} Connected with result code {reason_code}")
@@ -484,7 +676,49 @@ class MainWindow(QMainWindow):
         self.MESSAGE_SIGNAL.emit(msg)
 
     def publish_topic(self):
-        self.publish_message("foo/bar", "Hello, MQTT!")
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Publish message to topic")
+        dialog.setStyleSheet(self.stylesheet)
+
+        layout = QVBoxLayout(dialog)
+
+        topic_label = QLabel("Topic:")
+        topic_input = QLineEdit()
+
+
+        layout.addWidget(topic_label)
+        layout.addWidget(topic_input)
+
+        message_label = QLabel("Message:")
+        message_input = QLineEdit()
+        message_input.setText("ON")
+        layout.addWidget(message_label)
+        layout.addWidget(message_input)
+
+        data_settings = self.get_settings_data()
+        last_topic = data_settings['data']['last_topic'] if 'last_topic' in data_settings['data'] else None
+        if last_topic is not None:
+            saved_last_topic = data_settings['data']['last_topic']
+            topic_input.setText(saved_last_topic.get("topic", ""))
+            message_input.setText(saved_last_topic.get("message", ""))
+        publish_button = QPushButton("Publish")
+        layout.addWidget(publish_button)
+
+        def on_publish_button_clicked():
+            topic = topic_input.text()
+            message = message_input.text()
+            dialog.accept()
+            data_settings = self.get_settings_data()
+            # self.save_settings()
+            data_settings['data']['last_topic'] = {'topic': topic, 'message': message}
+            msg_info: MQTTMessageInfo = self.mqtt_client.publish(topic, message)
+            if msg_info.rc == mqtt.MQTT_ERR_SUCCESS:
+                self.status_bar.showMessage(f"Published message to {topic}")
+            else:
+                self.status_bar.showMessage(f"Failed to publish message to {topic}")
+
+        publish_button.clicked.connect(on_publish_button_clicked)
+        dialog.exec()
 
     def publish_message(self, topic, message):
         self.mqtt_client.publish(topic, message)
@@ -507,7 +741,9 @@ class MainWindow(QMainWindow):
         return None
 
 
-app = QApplication(sys.argv)
-window = MainWindow()
-window.show()
-sys.exit(app.exec())
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
+
