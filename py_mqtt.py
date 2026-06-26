@@ -56,6 +56,7 @@ class MainWindow(QMainWindow):
     QLabel {
         background-color: white;
         color: black;
+        font-size: 20px;
     }
 
     QLabel {
@@ -65,11 +66,13 @@ class MainWindow(QMainWindow):
     QMenuBar {
         background-color: #444;
         color: #fff;
+        font-size: 20px;
     }
 
     QMenuBar::item {
         background-color: #444;
         color: #fff;
+        font-size: 20px;
     }
 
     QMenuBar::item:selected {
@@ -89,6 +92,8 @@ class MainWindow(QMainWindow):
         background-color: #fff;
         alternate-background-color: #f9f9f9;
         color: black;
+        font-size: 20px;
+
     }
 
     QTreeWidget::item {
@@ -180,6 +185,18 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         exit_action.setShortcut("Ctrl+Q")
         file_menu.addAction(exit_action)
+
+        # font size actions
+        increase_font_action = QAction("Increase font size", self)
+        # plus is shift on many keyboards, also accept Ctrl+= as alternative
+        increase_font_action.setShortcuts(["Ctrl++", "Ctrl+="])
+        increase_font_action.triggered.connect(lambda: self.change_font_size(1))
+        file_menu.addAction(increase_font_action)
+
+        decrease_font_action = QAction("Decrease font size", self)
+        decrease_font_action.setShortcut("Ctrl+-")
+        decrease_font_action.triggered.connect(lambda: self.change_font_size(-1))
+        file_menu.addAction(decrease_font_action)
 
         self.setMenuWidget(menu_bar)
         
@@ -350,7 +367,7 @@ class MainWindow(QMainWindow):
     def get_settings_data(self) -> dict:
             if self.cipher is None:
                 if self.password_dialog() == False:
-                    return {'data': {'hosts': {}}}
+                    return {'hosts': {}}
             settings = QSettings("PyMQTT", "Settings")
             data_settings_json: dict = settings.value("data", None)
             if data_settings_json is None:
@@ -382,9 +399,8 @@ class MainWindow(QMainWindow):
         url_input = QComboBox()
         url_input.setEditable(True)
 
-        hosts = self.get_from_settings('hosts', True)
-        if hosts is not None:
-            url_input.addItems(hosts.keys())
+        hosts = self.get_from_settings('hosts', True, defaultValue={})
+        url_input.addItems(hosts.keys())
 
         layout.addWidget(url_label)
         layout.addWidget(url_input)
@@ -519,7 +535,7 @@ class MainWindow(QMainWindow):
         self.tree_widget.clear()
         self.watch_list_table.clearContents()
 
-        hosts = self.get_from_settings('hosts', True)
+        hosts = self.get_from_settings('hosts', True, defaultValue={})
         if result._host not in hosts:
             hosts[result._host] = {}
         hosts[result._host]['port'] = result._port
@@ -556,27 +572,27 @@ class MainWindow(QMainWindow):
                 return False
         return True
 
-    def get_from_settings(self, key: str, encrypted: bool = True) -> any:
+    def get_from_settings(self, key: str, encrypted: bool = True, defaultValue=None) -> any:
         """Get value from settings. Encrypted option will be saved under key 'data'"""
         settings = QSettings("PyMQTT", "Settings")
         if encrypted == True:
             if self.check_cipher() == True:
-                data_settings_json: str = settings.value('data', None)
+                data_settings_json: str = settings.value('data', defaultValue=None)
                 if data_settings_json is None:
-                    return None
+                    return defaultValue
                 try:
                     data_settings = json.loads(self.cipher.decrypt(data_settings_json.encode()).decode())
-                    return data_settings.get(key, None)
+                    return data_settings.get(key, defaultValue)
                 except json.JSONDecodeError:
                     QMessageBox.warning(self, "JSON bad", "Invalid JSON data")
-                    return None
+                    return defaultValue
                 except InvalidToken as e:
                     QMessageBox.warning(self, "Invalid Token", "The provided password is incorrect.")
-                    return None
+                    return defaultValue
             else:
-                return None
+                return defaultValue
         else:
-            return settings.value(key, None)
+            return settings.value(key, defaultValue)
         
     def save_to_settings(self, key: str, value: any, encrypted: bool = True):
         """Save key value pair to settings. Encrypted option will be saved under key 'data'"""
@@ -664,6 +680,31 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print(f"Error updating watch list: {e}")
 
+    def change_font_size(self, delta: int):
+        """Adjust the application font size by `delta` points.
+
+        This updates the global application font and also iterates over
+        existing widgets so that menus/tree/views reflect the change
+        immediately. The stylesheet doesn't override font-size for these
+        widgets, but setting the font on each object ensures visual updates.
+        """
+        font = QApplication.font()
+        size = font.pointSize()
+        if size < 0:
+            # some systems may return -1 if not set; use default float size
+            size = QApplication.font().pointSizeF()
+        new_size = max(1, size + delta)
+        font.setPointSize(new_size)
+
+        # apply globally
+        QApplication.setFont(font)
+        # refresh all existing widgets so changes apply immediately
+        for w in QApplication.allWidgets():
+            w.setFont(font)
+
+        # also reapply stylesheet in case it affects font-related rules
+        self.setStyleSheet(self.stylesheet)
+
     def on_connect(self, client: mqtt.Client, userdata, connect_flags, reason_code, properties):
         print(f"{userdata['id']} Connected with result code {reason_code}")
         client.subscribe("#")  # Subscribe to all topics
@@ -696,6 +737,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(message_input)
 
         data_settings = self.get_settings_data()
+        if 'data' not in data_settings:
+            data_settings['data'] = {}
         last_topic = data_settings['data']['last_topic'] if 'last_topic' in data_settings['data'] else None
         if last_topic is not None:
             saved_last_topic = data_settings['data']['last_topic']
