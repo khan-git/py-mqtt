@@ -11,6 +11,8 @@ import base64
 from queue import Empty, SimpleQueue
 import os
 
+from tree_widget import QTreeWidgetExtended, QTreeWidgetItemExtended
+
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -223,34 +225,24 @@ class MainWindow(QMainWindow):
         tab2_layout = QVBoxLayout(self.tab2)
 
         # Tab 1 Tree
-        self.tree_widget: QTreeWidget = QTreeWidget(self)
+        self.tree_widget: QTreeWidgetExtended = QTreeWidgetExtended(self)
         self.tree_widget.setHeaderLabels(["Topic", "Value"])
         self.tree_widget.itemDoubleClicked.connect(self.on_item_double_clicked)
-        self.tree_widget.setSortingEnabled(True)
-        self.tree_widget.sortItems(0, Qt.SortOrder.AscendingOrder)
-        self.tree_widget.setAlternatingRowColors(True)
         self.tree_widget.itemExpanded.connect(self.resize_columns)
         self.tree_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree_widget.customContextMenuRequested.connect(self.open_context_menu)
 
         # Tab 2 Watch list
-        self.watch_list_table = QTableWidget()
-        self.tab2.layout().addWidget(self.watch_list_table)
+        self.watch_list_tree: QTreeWidgetExtended = QTreeWidgetExtended(self)
+        self.tab2.layout().addWidget(self.watch_list_tree)
 
-        self.watch_list_table.setColumnCount(2)
-        self.watch_list_table.setHorizontalHeaderLabels(["Topic", "Value"])
-        self.watch_list_table.setSortingEnabled(True)
-        self.watch_list_table.sortItems(0, Qt.SortOrder.AscendingOrder)
-        self.watch_list_table.setAlternatingRowColors(True)
         # self.watch_list_table.itemDoubleClicked.connect(self.on_item_double_clicked)
-        self.watch_list_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.watch_list_table.customContextMenuRequested.connect(self.context_menu_watch_list)
-        self.watch_list_table.resizeColumnsToContents()
-        self.watch_list_table.resizeRowsToContents()
-        self.watch_list_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.watch_list_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.watch_list_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.watch_list_table.setShowGrid(True)
+        self.watch_list_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.watch_list_tree.customContextMenuRequested.connect(self.context_menu_watch_list)
+        self.watch_list_tree.resize()
+        self.watch_list_tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.watch_list_tree.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.watch_list_tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
 
         # Set the tree widget as the central widget
         self.tab1.layout().addWidget(self.tree_widget)
@@ -269,7 +261,7 @@ class MainWindow(QMainWindow):
         worker = Worker(self.process_messages)
         worker.signals.result.connect(self.update_list)
         self.thread_pool.start(worker)
-            
+
     def open_context_menu(self, position):
         menu = QMenu()
         add_to_watch_action = QAction("Add to watchlist", self)
@@ -285,34 +277,42 @@ class MainWindow(QMainWindow):
         menu.addAction(remove_from_watch_action)
         menu.exec(self.tree_widget.viewport().mapToGlobal(position))
 
+    def _traverse_tree(self, node: QTreeWidgetItem):
+        if node.childCount() == 0:
+            return
+        for i in range(node.childCount()):
+            child = node.child(i)
+            if isinstance(child, QTreeWidgetItemExtended):
+                self.watch_list_tree.addNodeByTopic(child.getTopic(), child.text(1))
+            else:
+                self._traverse_tree(child)
+
     def add_to_watchlist(self, value):
         selected_item = self.tree_widget.currentItem()
         if selected_item:
-            topic = selected_item.text(0)
-            value = selected_item.text(1)
-            parent = selected_item.parent()
-            while parent:
-                topic = parent.text(0) + "/" + topic
-                parent = parent.parent()
-            items = self.watch_list_table.findItems(topic, Qt.MatchFlag.MatchExactly)
-            if len(items) == 0:
-                # The rows will get sorted once the topix is inserted.
-                # Latest row will not be row.count() - 1
-                self.watch_list_table.insertRow(self.watch_list_table.rowCount())                
-                topic_item = QTableWidgetItem(topic)
-                self.watch_list_table.setItem(self.watch_list_table.rowCount() - 1, 0, topic_item)
-                self.watch_list_table.setItem(topic_item.row(), 1, QTableWidgetItem(value))
-                self.watch_list_table.resizeColumnsToContents()
+            if isinstance(selected_item, QTreeWidgetItemExtended):
+                self.watch_list_tree.addNodeByTopic(selected_item.getTopic(), selected_item.text(1))            
+            elif selected_item.childCount() > 0:
+                self._traverse_tree(selected_item)
 
-                # Backup watch list
-                watch_list = [self.watch_list_table.item(row, 0).text() for row in range(self.watch_list_table.rowCount())]
-                print(f"Watch list: {watch_list}")
-                self.save_to_settings('watch_list', watch_list, True)
+            # Backup watch list
+            watch_list = self.get_from_settings('watch_list', True)            
+            watch_list.append(self.tree_widget.getTopicFromNode(selected_item))
+            self.save_to_settings('watch_list', watch_list, True)
 
     def remove_from_watchlist(self, value):
-        selected_item = self.watch_list_table.currentItem()
+        selected_item = self.watch_list_tree.currentItem()
         if selected_item:
-            self.watch_list_table.removeRow(selected_item.row())
+            watch_list = self.get_from_settings('watch_list', True)
+            if selected_item.parent() is not None:
+                selected_item.parent().removeChild(selected_item)
+            else:
+                self.watch_list_tree.takeTopLevelItem(self.watch_list_tree.indexOfTopLevelItem(selected_item))
+            # self.watch_list_tree.removeRow(selected_item.row())
+            topic = self.tree_widget.getTopicFromNode(selected_item)
+            if topic in watch_list:
+                watch_list.remove(topic)
+                self.save_to_settings('watch_list', watch_list, True)
 
     def closeEvent(self, event):
         self.abort_thread = True
@@ -344,25 +344,71 @@ class MainWindow(QMainWindow):
         self.tree_widget.resizeColumnToContents(0)
         self.tree_widget.resizeColumnToContents(1)
 
-    def on_item_double_clicked(self, item: QTreeWidgetItem, column: int):
-        if item.childCount() == 0:
-            topic = item.text(0)
+    def on_item_double_clicked(self, item: QTreeWidgetItem | QTreeWidgetItemExtended, column: int):
+        # modifiers = QApplication.keyboardModifiers()
+        # if modifiers == Qt.KeyboardModifier.ControlModifier:
+        #     pass
+        if isinstance(item, QTreeWidgetItemExtended):
+            full_topic = item.getTopic()
             value = item.text(1)
             try:
                 json_value = json.loads(value)
                 formatted_value = json.dumps(json_value, indent=4)
                 text_browser = QTextBrowser()
                 text_browser.setPlainText(formatted_value)
+                text_browser.setReadOnly(False)
                 dialog = QDialog(self)
-                dialog.setWindowTitle(f"Edit Value for topic '{topic}'")
+                dialog.setWindowTitle(f"Edit Value for topic '{full_topic}'")
                 layout = QVBoxLayout()
                 layout.addWidget(text_browser)
+                buttons_layout = QHBoxLayout()
+                layout.addLayout(buttons_layout)
+                retain = QCheckBox("Retain")
+                buttons_layout.addWidget(retain)
+                button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+                buttons_layout.addWidget(button_box)
+
+                def on_save_clicked():
+                    new_value = None
+                    try:
+                        new_value = json.loads(text_browser.toPlainText())
+                        new_value = json.dumps(new_value)
+                        dialog.accept()
+                    except json.JSONDecodeError:
+                        if QMessageBox.warning(self, "Invalid JSON", "The entered value is not valid JSON. Do you want to save it anyway?", 
+                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
+                            print(f"New value: {full_topic}: {new_value}")
+                            new_value = text_browser.toPlainText()
+                            dialog.accept()
+                    if new_value is not None:
+                        self.publish_message(full_topic, new_value, retain=retain.isChecked())
+
+                def on_cancel_clicked():
+                    dialog.reject()
+
+                button_box.accepted.connect(on_save_clicked)
+                button_box.rejected.connect(on_cancel_clicked)
                 dialog.setLayout(layout)
                 dialog.resize(1200, 800)
                 dialog.exec()
-            except json.JSONDecodeError:
-                QInputDialog.getText(
-                    self, "Edit Value", f"Current value for topic '{topic}'", text=value)
+            except json.JSONDecodeError:                
+                (new_value, accepted) = QInputDialog.getText(
+                    self, "Edit Value", f"Topic: {full_topic}", text=value)
+                if accepted:
+                    print(f"New value: {full_topic}: {new_value}")
+                    self.publish_message(full_topic, new_value)
+
+    def on_item_double_clicked_with_ctrl(self, item: QTreeWidgetItem, column: int):
+        modifiers = QApplication.keyboardModifiers()
+        if modifiers == Qt.KeyboardModifier.ControlModifier:
+            self.expand_all_children(item)
+
+    def expand_all_children(self, item: QTreeWidgetItem):
+        item.setExpanded(True)
+        if item.childCount() > 10:
+            return
+        for i in range(item.childCount()):
+            self.expand_all_children(item.child(i))
 
     def get_settings_data(self) -> dict:
             if self.cipher is None:
@@ -422,18 +468,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(password_label)
         layout.addWidget(password_input)
 
-        last_host = self.get_from_settings('last_host', True)
-
-        last_host: str  = last_host if last_host is not None else ''
-        if last_host in hosts:
-            url_input.setCurrentText(last_host)
-            port_input.setText(str(hosts[last_host].get("port", "")))
-            username_input.setText(hosts[last_host].get("username", ""))
-            password_input.setText(hosts[last_host].get("password", ""))
-            # port_input.setText(str(data_settings['hosts'][last_host].get("port", "")))
-            # username_input.setText(data_settings['hosts'][last_host].get("username", ""))
-            # password_input.setText(data_settings['hosts'][last_host].get("password", ""))
-
         def on_url_input_changed():
             selected_url = url_input.currentText()
             if selected_url in hosts:
@@ -441,7 +475,22 @@ class MainWindow(QMainWindow):
                 username_input.setText(hosts[selected_url].get("username", ""))
                 password_input.setText(hosts[selected_url].get("password", ""))
 
-        url_input.currentTextChanged.connect(on_url_input_changed)
+        hosts = self.get_from_settings('hosts', True)
+        if hosts is not None:
+            url_input.addItems(hosts.keys())
+
+            last_host = self.get_from_settings('last_host', True)
+
+            last_host: str  = last_host if last_host is not None else ''
+            if hosts and last_host in hosts:
+                url_input.setCurrentText(last_host)
+                port_input.setText(str(hosts[last_host].get("port", "")))
+                username_input.setText(hosts[last_host].get("username", ""))
+                password_input.setText(hosts[last_host].get("password", ""))
+
+            url_input.currentTextChanged.connect(on_url_input_changed)
+
+
 
         connect_button = QPushButton("Connect")
         layout.addWidget(connect_button)
@@ -533,7 +582,7 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(f"Connected to {result._host}")
 
         self.tree_widget.clear()
-        self.watch_list_table.clearContents()
+        self.watch_list_tree.clear()
 
         hosts = self.get_from_settings('hosts', True, defaultValue={})
         if result._host not in hosts:
@@ -557,12 +606,12 @@ class MainWindow(QMainWindow):
             return
         print(f"Watch list: {watch_list}")
         for topic in watch_list:
-            self.watch_list_table.insertRow(self.watch_list_table.rowCount())
-            topic_item = QTableWidgetItem(topic)
-            self.watch_list_table.setItem(self.watch_list_table.rowCount() - 1, 0, topic_item)
-            self.watch_list_table.setItem(topic_item.row(), 1, QTableWidgetItem(""))
+            if topic is None:
+                continue
+            self.watch_list_tree.addNodeByTopic(topic, "")
 
-        self.watch_list_table.resizeColumnsToContents()
+        self.watch_list_tree.expandAll()
+        self.watch_list_tree.resize()
 
 
     def check_cipher(self) -> bool:
@@ -642,43 +691,12 @@ class MainWindow(QMainWindow):
     def handle_message(self, message: mqtt.MQTTMessage):
         # print(f"Received message: {message.topic} - {message.payload.decode()}")
         self.raw_mqtt_browser.append(f"{message.topic} - {message.payload.decode()}")
-        topics = message.topic.split("/")
-        node: QTreeWidgetItem = self.tree_widget.invisibleRootItem()
-        topic: str
-        for topic in topics:
-            for child_index in range(node.childCount()):
-                child: QTreeWidgetItem = node.child(child_index)
-                if child.text(0) == topic:
-                    node = child
-                    break
-            if node.text(0) != topic:
-                if topic == topics[-1]:
-                    new_child = QTreeWidgetItem()
-                    new_child.setText(0, topic)
-                    new_child.setText(1, message.payload.decode())
-                    node.addChild(new_child)
-                    self.tree_widget.resizeColumnToContents(0)
-                else:
-                    if node.text(0) == "<root>":
-                        node.setText(0, topic)
-                        node.setText(1, "")
-                    else:
-                        new_child = QTreeWidgetItem()
-                        new_child.setText(0, topic)
-                        node.addChild(new_child)
-                        node = new_child
-            elif topic == node.text(0) and topic == topics[-1]:
-                node.setText(1, message.payload.decode())
-
+        payload = message.payload.decode()
+        self.tree_widget.addNodeByTopic(message.topic, payload)
 
         # Do Watch list
-        items = self.watch_list_table.findItems(message.topic, Qt.MatchFlag.MatchExactly)
-        if len(items) > 0:
-            try:
-                print(f"Watch list - {message.topic}: {message.payload.decode()} - {len(items)} {items[0].row()}")
-                self.watch_list_table.item(items[0].row(), 1).setText(message.payload.decode())
-            except Exception as e:
-                print(f"Error updating watch list: {e}")
+        if self.watch_list_tree.findNodeByPath(message.topic) is not None:
+            self.watch_list_tree.addNodeByTopic(message.topic, payload)
 
     def change_font_size(self, delta: int):
         """Adjust the application font size by `delta` points.
@@ -713,7 +731,6 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Disconnected", f"Disconnected with reason code {reason_code}")
 
     def on_message(self, client: mqtt.Client, userdata, msg: mqtt.MQTTMessage):
-        # self.msg_queue.put(msg)
         self.MESSAGE_SIGNAL.emit(msg)
 
     def publish_topic(self):
@@ -763,8 +780,8 @@ class MainWindow(QMainWindow):
         publish_button.clicked.connect(on_publish_button_clicked)
         dialog.exec()
 
-    def publish_message(self, topic, message):
-        self.mqtt_client.publish(topic, message)
+    def publish_message(self, topic, message, retain=False):
+        self.mqtt_client.publish(topic, message, retain=retain)
 
     def create_client(self, url, port=1883, user_data: dict = {}, keepalive=60, username: str = None, password: str = None):
         try:
